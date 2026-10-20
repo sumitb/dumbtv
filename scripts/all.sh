@@ -19,6 +19,12 @@ if [[ ! -f $CONF ]]; then
   run "$DIR/configure.sh" || exit 1
 fi
 
+# configure.sh runs in a child process, so load its saved opt-in here too.
+# A dry-run may not have written a config; absent YOUTUBE still defaults to 0.
+if [[ -f $CONF ]]; then
+  source "$CONF" || exit 1
+fi
+
 run "$DIR/debloat.sh"   || exit 1
 run "$DIR/lockdown.sh"  || exit 1
 run "$DIR/dnsfilter.sh" || exit 1

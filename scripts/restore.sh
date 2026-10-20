@@ -8,7 +8,7 @@ parse_flags "$@"
 need_device
 
 step "plan"
-note "re-enable/restore every package in data/fireos/packages.txt"
+note "re-enable/restore every package in ${DATA#$ROOT/}/$(basename "$(dirname "$(fos packages.txt)")")/packages.txt"
 note "clear app-ops and network blacklists"
 note "detach the DNS filter and the launcher hook"
 note "put back every setting from report/settings-before-*.txt, or the bundled defaults"
@@ -31,11 +31,12 @@ restore_value() {
 }
 
 step "packages"
-for p in $(list_of "$DATA/fireos/packages.txt"); do
-  a=$(acmd cmd package install-existing "$p" 2>&1 | head -1)
+for p in $(list_of "$(fos packages.txt)"); do
+  # Fire OS 6 has no install-existing; debloat.sh only disabled there, so enable is enough.
+  a="no install-existing"
+  [[ $REINSTALL == 1 ]] && a=$(acmd cmd package install-existing "$p" 2>&1 | head -1)
   b=$(acmd pm enable --user 0 "$p" 2>&1 | head -1)
-  acmd appops set "$p" RUN_IN_BACKGROUND allow >/dev/null 2>&1
-  acmd appops set "$p" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1
+  bg_on "$p"
   uid=$(uid_of "$p")
   [[ -n $uid ]] && acmd cmd netpolicy remove restrict-background-blacklist "$uid" >/dev/null 2>&1
   printf '  %-46s %s / %s\n' "$p" "${a:-no output}" "${b:-no output}"
@@ -45,17 +46,15 @@ step "packages that were only starved"
 if [[ -f $REPORT/debloat.txt ]]; then
   while IFS=$'\t' read -r p state rest; do
     [[ -z ${p:-} ]] && continue
-    acmd appops set "$p" RUN_IN_BACKGROUND allow >/dev/null 2>&1
-    acmd appops set "$p" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1
+    bg_on "$p"
     uid=$(uid_of "$p")
     [[ -n $uid ]] && acmd cmd netpolicy remove restrict-background-blacklist "$uid" >/dev/null 2>&1
     printf '  %-46s %s\n' "$p" "${state:-unknown}"
   done < "$REPORT/debloat.txt"
 else
   note "no report/debloat.txt, relying on protected.txt only"
-  for p in $(list_of "$DATA/fireos/protected.txt"); do
-    acmd appops set "$p" RUN_IN_BACKGROUND allow >/dev/null 2>&1
-    acmd appops set "$p" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1
+  for p in $(list_of "$(fos protected.txt)"); do
+    bg_on "$p"
     uid=$(uid_of "$p")
     [[ -n $uid ]] && acmd cmd netpolicy remove restrict-background-blacklist "$uid" >/dev/null 2>&1
     printf '  %-46s cleared\n' "$p"
@@ -67,6 +66,12 @@ step "on-device hooks"
 # Without this the TV keeps sending DNS through a filter the user just tried to
 # undo, and HOME stays hijacked.
 acmd settings delete secure always_on_vpn_app >/dev/null 2>&1
+# Fire OS 6 starts the filter from its own boot receiver, not from always_on_vpn_app, so
+# it would keep filtering after a restore unless it is disabled too.
+if [[ $SDK -lt 28 ]] && present dnsfilter.android; then
+  acmd pm disable-user --user 0 dnsfilter.android >/dev/null 2>&1
+  note "personalDNSfilter disabled (Fire OS 6 would start it again at boot)"
+fi
 acmd settings put secure enabled_accessibility_services "" >/dev/null 2>&1
 acmd settings put secure accessibility_enabled 0 >/dev/null 2>&1
 alarms=$(restore_value global alarm_manager_constants "")
@@ -83,7 +88,7 @@ while read -r ns key value; do
   want=$(restore_value "$ns" "$key" "$value")
   acmd settings put "$ns" "$key" "$want" >/dev/null
   printf '  %-46s %s\n' "$key" "$want"
-done < <(list_of "$DATA/fireos/settings.restore.txt" | sed 's/ = / /')
+done < <(list_of "$(fos settings.restore.txt)" | sed 's/ = / /')
 
 [[ $DRY_RUN == 1 ]] && { note "[dry-run] done"; exit 0; }
 reboot_wait

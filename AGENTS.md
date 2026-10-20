@@ -63,7 +63,7 @@ Ask these, in plain language, and wait for answers:
    yes the video CDN is kept out of the blocklist (otherwise playback breaks).
 3. "Do you want Amazon's home screen replaced with dumbtv home, or kept?" —
    dumbtv home is this repo's own launcher (`launcher/`): apps and HDMI inputs
-   only, open source, zero permissions. Replacing removes the promo tiles;
+   only, open source, no internet permission (no permissions at all on Fire OS 7/8). Replacing removes the promo tiles;
    keeping Amazon's is less intrusive. Do not install Projectivy or another
    closed-source launcher instead.
 4. "Do you want the on-TV DNS filter?" — that is what actually stops telemetry
@@ -101,7 +101,7 @@ scripts for preferences.
 adb connect <TV_IP>:5555
 adb devices                                  # the line must end in "device"
 adb shell getprop ro.product.manufacturer    # "Amazon" = Fire OS
-adb shell getprop ro.build.version.sdk       # 28 = Fire OS 7
+adb shell getprop ro.build.version.sdk       # 25 = Fire OS 6, 28 = Fire OS 7, 30 = Fire OS 8
 ```
 
 `unauthorized` means the TV is showing an "Allow USB debugging" prompt — a human

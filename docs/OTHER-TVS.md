@@ -6,9 +6,9 @@ does the TV let a normal owner (no root, no soldering) run commands on it.
 
 | Platform | Disable vendor apps | Replace the home screen | On-device DNS filter | Status |
 |---|---|---|---|---|
-| **Fire OS 6** (2017–2018 devices) | yes, some are protected | yes, `Keeper` + usage stats | yes | tested on a Stick 4K (AFTMM) |
+| **Fire OS 6** (2017–2018 devices) | yes, some are protected | yes, `Keeper` + usage stats | yes | tested on a Stick 4K (AFTMM); own lists in `data/fireos6/` |
 | **Fire OS 7** (Android 9) | yes, some are protected | yes, accessibility `Guard` | yes | **tested end to end, what this repo was built on** |
-| **Fire OS 8** (Android 11) | yes, protected list differs | varies — accessibility can be refused | yes | expected to work, not verified here |
+| **Fire OS 8** (Android 11) | yes, protected list differs | not yet — Android 11 blocks the launch (`docs/GOTCHAS.md`) | yes, with one step in the app | partly works on a Stick 4K Max (AFTKM), community report |
 | **Android TV / Google TV** (Sony, TCL, Philips, Hisense, Xiaomi, Shield…) | yes, `pm disable-user` | yes, by disabling the stock launcher | yes, Private DNS or a local-VPN app | method documented, no verified package list yet |
 | **Samsung Tizen** | store apps only | no | no | a wall without root |
 | **LG webOS** | no | no | no | dev mode installs apps, nothing else |
@@ -28,7 +28,8 @@ answer for a TV that refuses to be opened.
 This is the platform the scripts in `scripts/` are written for.
 
 Run `scripts/preflight.sh`, then `scripts/debloat.sh --dry-run`, then for real.
-`PROTECTED` lines tell you what to add to `data/fireos/protected.txt`. Anything
+`PROTECTED` lines tell you what to add to `data/fireos/protected.txt` (Fire OS 8)
+or `data/fireos6/protected.txt` (Fire OS 6). Anything
 `absent` simply is not on that device. Do not copy lists from the internet —
 package names and protections moved between releases, and TV-specific packages
 (panel, tuner, backlight) exist only on televisions.

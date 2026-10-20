@@ -2,10 +2,12 @@
 
 A home screen for Fire TV that does one job: show your apps and your HDMI inputs.
 
-- **41 KB APK.** Plain Java and Android views: no AndroidX, Kotlin, Compose, Play
+- **45 KB APK.** Plain Java and Android views: no AndroidX, Kotlin, Compose, Play
   Services or other libraries.
-- **No permissions at all.** It has no `INTERNET` permission, so Android blocks it
-  from opening any network connection. Check it yourself:
+- **No network.** It has no `INTERNET` permission, so Android blocks it from
+  opening any network connection. The APK declares usage access, reorder-tasks
+  and boot-completed with `android:maxSdkVersion="27"`: Fire OS 6 requests them
+  for the Keeper described below, Fire OS 7/8 does not. Check it yourself:
   `aapt2 dump permissions build/dumbtv-home.apk`.
 - **No ads, no "recommended" rows, no account, no analytics, no update checks.**
 
@@ -24,8 +26,9 @@ That is all. The APK comes from this repo's
 refuses to install it if the checksum differs from the one pinned in
 `install.sh`. Prefer to install by hand? Download `dumbtv-home.apk` from the
 release and `adb install` it — but HOME only switches over after `install.sh`
-(or `scripts/launcher.sh`) has set up the accessibility service and the alarm
-setting described below.
+(or `scripts/launcher.sh`) has installed the HOME hook described below: the
+accessibility service and alarm setting on Fire OS 7/8, the UsageStats Keeper on
+Fire OS 6.
 
 Undo: `./launcher/install.sh --undo` gives HOME back to Amazon's launcher.
 
@@ -38,8 +41,8 @@ install/delete. Measured on an Onida Fire TV Edition (Fire OS 7.7, 1.4 GB RAM):
 
 | | dumbtv home | Projectivy 4.72 |
 |---|---|---|
-| APK | 41 KB | several MB |
-| Permissions requested | 0 | 20+, incl. advertising ID |
+| APK | 45 KB | several MB |
+| Permissions requested | 0 (Fire OS 7/8); usage access (Fire OS 6) | 20+, incl. advertising ID |
 | RAM, home on screen | 57–72 MB PSS | 135 MB PSS |
 | RAM, while an app plays | ~37 MB PSS | — |
 | HOME → home screen | 0.16–0.25 s | 3–6 s, Amazon's home shows first |
@@ -105,7 +108,7 @@ inputs=on
 background=black
 # 0 20 40 60 80, image background only
 dim=40
-# off visit hourly daily (visit = every return to the home screen)
+# off visit hourly daily daytime (visit = every return to the home screen)
 rotate=off
 apps.order=com.amazon.firetv.youtube,org.videolan.vlc
 apps.hide=org.videolan.vlc
@@ -127,6 +130,11 @@ adb shell mkdir -p /sdcard/Android/data/tv.dumbtv.home/files/wallpapers
 adb push *.jpg /sdcard/Android/data/tv.dumbtv.home/files/wallpapers/
 ```
 
+`rotate=daytime` matches wallpapers to the time of day: name a file with `morning` or `day`
+(06:00–13:00), `afternoon` or `evening` (13:00–20:00), or `night` (the rest), for example
+`morning-coast.jpg` or `night-city.jpg`. Several files for one period take turns on each
+return home. With no file named that way, the period simply picks one image of the folder.
+
 ## How HOME works on Fire OS
 
 Fire OS 7 has no working "default launcher" setting, and Amazon's launcher is a
@@ -147,6 +155,24 @@ protected package. Three things combine to make HOME land here, measured on this
 
 What you see on HOME: the app, then about 0.3 s of black, then this home screen.
 
+### Fire OS 6
+
+Fire OS 6.7 goes further: its `A11yAuthorizer` refuses third-party accessibility
+services, so `Guard` is never bound and HOME cannot be taken over that way. The
+Fire OS 6 build therefore uses `Keeper`, a small foreground service that needs no
+accessibility:
+
+1. `UsageStats` (`appops set tv.dumbtv.home GET_USAGE_STATS allow`, granted by
+   `install.sh`) tells it when Amazon's launcher reaches the foreground.
+2. `ActivityManager.moveTaskToFront` brings the dumbtv task back. This is not an
+   activity launch, so it is not held back by the 5 s app-switch delay: measured
+   under 0.25 s with a real remote key.
+3. At boot there is no dumbtv task yet, so the first start uses an alarm-fired
+   `PendingIntent`; after that, `moveTaskToFront` takes over.
+
+`Options > Open Amazon's home screen` pauses the Keeper, so Amazon's home stays
+until another app is opened.
+
 ## Files
 
 | File | What it is |
@@ -156,9 +182,11 @@ What you see on HOME: the app, then about 0.3 s of black, then this home screen.
 | `src/.../Catalog.java` | which apps and inputs exist, and which are shown in what order |
 | `src/.../Config.java` | the `home.conf` reader and writer |
 | `src/.../Options.java` | the settings screen |
-| `src/.../Guard.java` | the HOME takeover described above |
+| `src/.../Guard.java` | the Fire OS 7/8 HOME takeover described above |
+| `src/.../Keeper.java` | the Fire OS 6 HOME takeover (UsageStats + moveTaskToFront) |
+| `src/.../BootReceiver.java` | restarts the Keeper after a boot or an update |
 | `build.sh` | aapt2 → javac → d8 → zipalign → apksigner |
-| `install.sh` | download + checksum (or `--build`), install, accessibility setup, alarm constant, `--undo` |
+| `install.sh` | download + checksum (or `--build`), install, HOME hook (Guard or Keeper), `--undo` |
 | `version.env` | the only place `VERSION` and `APK_SHA256` live; both scripts read it |
 | `release-check.sh` | proves version, built APK and GitHub release agree (`--local`, `--remote`, `--manifest`) |
 

@@ -2,15 +2,16 @@
 # Interview: what does this person actually want to keep?
 # Writes dumbtv.conf (git-ignored), which debloat.sh, dnsfilter.sh and
 # launcher.sh read. Agents must run this before the destructive steps instead of
-# guessing. Usage: ./scripts/configure.sh [--keep "pkg pkg"] [--remove "pkg"] [-y] [--dry-run]
+# guessing. Usage: ./scripts/configure.sh [--keep "pkg pkg"] [--remove "pkg"] [--system-dns 0|1] [-y] [--dry-run]
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-KEEP_ARG=""; REMOVE_ARG=""
+KEEP_ARG=""; REMOVE_ARG=""; SYSTEM_DNS_ARG=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --keep)   KEEP_ARG=$2; shift 2 ;;
     --remove) REMOVE_ARG=$2; shift 2 ;;
+    --system-dns) SYSTEM_DNS_ARG=$2; shift 2 ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "unknown flag: $1" ;;
@@ -46,7 +47,7 @@ while IFS= read -r -u 3 p; do
   else
     note "remove $name ($p)"
   fi
-done 3< <(list_of "$DATA/fireos/user-apps.txt")
+done 3< <(list_of "$(fos user-apps.txt)")
 
 if [[ $(yn "Do you watch Prime Video? (keeps its CDN out of the filter)" 1) == 1 ]]; then
   PRIME=1; note "prime: kept"
@@ -54,8 +55,13 @@ else
   PRIME=0; note "prime: blocked (playback will not work)"
 fi
 
-LAUNCHER=$(yn "Replace Amazon's home screen with dumbtv home (open source, no ads, no permissions)?" 1)
+LAUNCHER=$(yn "Replace Amazon's home screen with dumbtv home (open source, no ads, no internet access)?" 1)
 DNSFILTER=$(yn "Run the on-TV DNS filter (blocks Amazon telemetry and updates)?" 1)
+if [[ -n $SYSTEM_DNS_ARG ]]; then
+  SYSTEM_DNS=$SYSTEM_DNS_ARG
+else
+  SYSTEM_DNS=$(yn "Fire OS 6 only: let system apps bypass the filter so the clock syncs? Amazon's system-user apps go unfiltered too" 0)
+fi
 # Default no: YouTube is the app people actually watch, and the stock app stays
 # unless they say otherwise. scripts/youtube.sh is the only thing that touches it.
 if [[ $(yn "Replace the YouTube app with SmartTube (no ads, no Shorts)? Your YouTube account and subscriptions are untouched" 0) == 1 ]]; then
@@ -80,7 +86,7 @@ if [[ $DRY_RUN == 1 ]]; then
   step "would write $CONF"
   note "KEEP_APPS=\"$KEEP\""
   note "REMOVE_EXTRA=\"$EXTRA\""
-  note "PRIME=$PRIME LAUNCHER=$LAUNCHER DNSFILTER=$DNSFILTER YOUTUBE=$YOUTUBE"
+  note "PRIME=$PRIME LAUNCHER=$LAUNCHER DNSFILTER=$DNSFILTER SYSTEM_DNS=$SYSTEM_DNS YOUTUBE=$YOUTUBE"
   exit 0
 fi
 
@@ -92,6 +98,7 @@ REMOVE_EXTRA="$EXTRA"
 PRIME=$PRIME
 LAUNCHER=$LAUNCHER
 DNSFILTER=$DNSFILTER
+SYSTEM_DNS=$SYSTEM_DNS
 YOUTUBE=$YOUTUBE
 EOF_CONF
 
@@ -100,6 +107,7 @@ EOF_CONF
 source "$CONF"
 case $LAUNCHER in 0|1) ;; *) die "internal error: LAUNCHER=$LAUNCHER";; esac
 case $DNSFILTER in 0|1) ;; *) die "internal error: DNSFILTER=$DNSFILTER";; esac
+case $SYSTEM_DNS in 0|1) ;; *) die "internal error: SYSTEM_DNS=$SYSTEM_DNS";; esac
 case $PRIME in 0|1) ;; *) die "internal error: PRIME=$PRIME";; esac
 case $YOUTUBE in 0|1) ;; *) die "internal error: YOUTUBE=$YOUTUBE";; esac
 
@@ -107,5 +115,5 @@ step "saved"
 note "${CONF#$ROOT/}"
 note "keep:     ${KEEP:-none}"
 note "remove:   ${EXTRA:-nothing extra}"
-note "prime=$PRIME launcher=$LAUNCHER dnsfilter=$DNSFILTER youtube=$YOUTUBE"
+note "prime=$PRIME launcher=$LAUNCHER dnsfilter=$DNSFILTER system_dns=$SYSTEM_DNS youtube=$YOUTUBE"
 note "change any answer later by running this again"

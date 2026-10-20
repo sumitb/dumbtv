@@ -139,7 +139,7 @@ step "writing"
   printf 'tested_on: "%s"\n' "$(yamlq "$BUILD")"
   if [[ -n $MODELS ]]; then
     printf 'models:\n'
-    printf '%s' "$MODELS" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed '/^$/d' | while read -r m; do
+    printf '%s\n' "$MODELS" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed '/^$/d' | while read -r m; do
       printf '  - "%s"\n' "$(yamlq "$m")"
     done
   else

@@ -2,6 +2,7 @@ package tv.dumbtv.home;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -15,6 +16,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -73,8 +75,8 @@ final class Config {
             new String[] {"0%", "20%", "40%", "60%", "80%"});
 
     static final Choice ROTATE = new Choice("rotate", "Wallpaper rotation", "off",
-            new String[] {"off", "visit", "hourly", "daily"},
-            new String[] {"Off", "Every return home", "Every hour", "Every day"});
+            new String[] {"off", "visit", "hourly", "daily", "daytime"},
+            new String[] {"Off", "Every return home", "Every hour", "Every day", "By time of day"});
 
     static final Choice[] CHOICES = {ACCENT, TILES, LABELS, CLOCK, INPUTS, BACKGROUND, DIM, ROTATE};
 
@@ -177,7 +179,8 @@ final class Config {
     }
 
     void setList(String key, List<String> items) {
-        set(key, String.join(",", items));
+        // String.join is Android 8+; TextUtils.join keeps Fire OS 6 (Android 7.1) working.
+        set(key, TextUtils.join(",", items));
     }
 
     void removePrefix(String... prefixes) {
@@ -228,6 +231,40 @@ final class Config {
         }
     }
 
+    /** 0 morning (6-13 h), 1 afternoon (13-20 h), 2 night. */
+    static int period() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return h >= 6 && h < 13 ? 0 : h >= 13 && h < 20 ? 1 : 2;
+    }
+
+    private static final String[][] PERIOD_WORDS = {
+        {"morning", "day"},
+        {"afternoon", "evening"},
+        {"night", "midnight"},
+    };
+
+    /**
+     * Files whose name carries a word for {@code period}; empty when others are tagged but not
+     * this one, null when no file is tagged at all (then the period just indexes the pool).
+     */
+    private static List<File> forPeriod(List<File> pool, int period) {
+        List<File> fit = new ArrayList<>();
+        boolean tagged = false;
+        for (File f : pool) {
+            // Whole words only, so "sunday.jpg" or "holiday.jpg" is not a morning picture.
+            List<String> words = Arrays.asList(f.getName().toLowerCase(Locale.ROOT).split("[^a-z]+"));
+            for (int p = 0; p < PERIOD_WORDS.length; p++) {
+                for (String w : PERIOD_WORDS[p]) {
+                    if (words.contains(w)) {
+                        tagged = true;
+                        if (p == period && !fit.contains(f)) fit.add(f);
+                    }
+                }
+            }
+        }
+        return tagged ? fit : null;
+    }
+
     List<File> wallpapers() {
         List<File> out = new ArrayList<>();
         File[] files = new File(dir, WALLPAPERS).listFiles();
@@ -248,7 +285,15 @@ final class Config {
         if (!pool.isEmpty()) {
             long now = System.currentTimeMillis();
             long step;
-            switch (get(ROTATE)) {
+            String mode = get(ROTATE);
+            if ("daytime".equals(mode)) {
+                int period = period();
+                List<File> fit = forPeriod(pool, period);
+                if (fit == null) return pool.get(period % pool.size());
+                if (!fit.isEmpty()) pool = fit;
+                mode = "visit";
+            }
+            switch (mode) {
                 case "visit": step = visits; break;
                 case "hourly": step = now / 3_600_000L; break;
                 case "daily": step = (now + TimeZone.getDefault().getOffset(now)) / 86_400_000L; break;

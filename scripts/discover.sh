@@ -17,6 +17,7 @@ PLATFORM=$(if is_fireos; then echo fireos; else echo androidtv; fi)
 MODEL=$(dev1 getprop ro.product.model)
 ANDROID=$(dev1 getprop ro.build.version.release)
 NEVER=$DATA/$PLATFORM/never-disable.txt
+[[ $PLATFORM == fireos ]] && NEVER=$(fos never-disable.txt)
 [[ -f $NEVER ]] || NEVER=$DATA/fireos/never-disable.txt
 OUT="$REPORT/discover-$PLATFORM-$(date +%Y%m%d-%H%M).txt"
 mkdir -p "$REPORT"

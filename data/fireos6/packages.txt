@@ -1,0 +1,99 @@
+# Amazon packages to disable on Fire OS 6 (Android 7.1, sdk 25). Fire OS 6 has no
+# `cmd package install-existing`, so debloat.sh never uninstalls these: it only
+# disables them, which restore.sh undoes with `pm enable`.
+#
+# Built from data/fireos/packages.txt, checked package by package on a Fire TV
+# Stick 4K (mantis, AFTMM) running Fire OS 6.7.1.1. Entries marked "fire os 6"
+# are not in the Fire OS 7 list; they were disabled on that stick and it kept
+# booting, the remote kept working and the streaming apps kept launching.
+#
+# Deliberately NOT here on Fire OS 6:
+#   com.amazon.firebat        on Fire OS 6 this is Prime Video itself
+#                             (com.amazon.pyrocore.IgnitionActivity), not an OTA helper
+#   com.amazon.ftv.screensaver  only runs while the TV is idle; without it and with
+#                             com.android.dreams.basic off, nothing covers a static screen
+
+# --- ads and targeting ---
+com.amazon.hybridadidservice           # advertising ID
+com.amazon.shoptv.client               # shopping on the TV
+com.amazon.shoptv.firetv.client        # fire os 6: second shopping client
+com.amazon.sneakpeek                   # autoplaying promos
+com.amazon.minitv.android.app          # ad-supported video service
+com.amazon.tahoe                       # ad/content tiles on Amazon's home
+com.amazon.privacypassservice          # ad-token service
+com.amazon.systemnotices               # Amazon system notices
+com.amazon.mvpdauth                    # fire os 6: US cable-provider sign-in
+com.amazon.tv.ottssocompanionapp
+com.amznfuse.operatorredirection       # fire os 6: telco partner redirection
+
+# --- telemetry, logging, crash reporting ---
+com.amazon.tv.fw.metrics
+com.amazon.wirelessmetrics.service
+com.amazon.perfcollection
+com.amazon.dp.logger
+com.amazon.logan
+com.amazon.ceviche                     # analytics pipeline
+com.amazon.connectivitydiag
+com.amazon.hedwig                      # watch time / engagement
+com.amazon.tigris
+com.amazon.spiderpork                  # metrics transport (listed as a third-party app on fire os 6)
+com.amazon.tv.developer.dataservice
+
+# --- experiments and remote config ---
+com.amazon.ale
+com.amazon.katoch
+
+# --- Alexa and the microphone app (com.amazon.vizzini stays: never-disable.txt) ---
+com.amazon.aca                         # the app that owns the mic
+com.amazon.aria                        # fire os 6: Alexa visual cards (APL)
+com.amazon.alexa.datastore.app
+com.amazon.alexamediaplayer.runtime.ftv
+com.amazon.alexa.externalmediaplayer.fireos
+com.amazon.tv.alexaalerts
+com.amazon.tv.alexanotifications
+com.amazon.vizzini.ftvcds
+com.amazon.audiohome
+com.amazon.whad                        # fire os 6: Alexa multi-room audio
+com.amazon.whasettings                 # fire os 6
+com.amazon.csm.htmlruntime
+com.amazon.spotify.mediabrowserservice
+com.amazon.wha.mediabrowserservice
+
+# --- OTA helpers (the real updater is protected, see protected.txt) ---
+com.amazon.tv.forcedotaupdater.v2
+
+# --- live TV: a stick has no tuner (on Fire TV Edition TVs these stay) ---
+com.amazon.tv.livetv                   # fire os 6: "Live" guide only, no tuner on a stick
+com.amazon.franktvinput                # fire os 6
+com.amazon.tifobserver                 # fire os 6
+
+# --- bloat, stubs, leftover UIs ---
+com.amazon.gamehub
+com.amazon.bueller.music
+com.amazon.bueller.photos
+com.amazon.imdb.tv.android.app         # fire os 6: Freevee
+com.imdb.livingroom.firetv             # fire os 6: IMDb
+com.amazon.storm.lightning.tutorial
+com.amazon.tmm.tutorial
+com.amazon.tv.releasenotes
+com.amazon.tv.website_launcher
+com.amazon.tv.support
+com.amazon.tv.easyupgrade
+com.amazon.tv.notificationcenter
+com.amazon.uxnotification
+com.amazon.cloud9                      # Silk browser
+com.amazon.wifilocker                  # fire os 6: uploads saved Wi-Fi passwords to Amazon
+com.amazon.whisperjoin.wss.wifiprovisioner  # fire os 6: Wi-Fi setup for other Amazon devices
+com.amazon.tv.ffsprovisioneeclient     # fire os 6: frustration-free setup client
+com.mediatek.atci.service              # fire os 6: MediaTek AT-command test service
+com.android.printspooler
+com.android.wallpapercropper           # fire os 6
+com.android.wallpaperbackup            # fire os 6
+com.android.dreams.basic               # fire os 6: AOSP screensaver, Amazon's is used instead
+com.android.bluetoothmidiservice       # fire os 6
+com.android.htmlviewer                 # fire os 6
+com.android.carrierconfig              # fire os 6: no SIM
+com.android.providers.calendar         # fire os 6
+com.ivona.orchestrator                 # fire os 6: text-to-speech (VoiceView reader)
+com.ivona.tts.oem                      # fire os 6
+com.svox.pico                          # fire os 6

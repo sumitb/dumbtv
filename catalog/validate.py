@@ -172,6 +172,9 @@ def check_common(path, top, nested, sch, full):
             fail(name, f"prompt '{label}' blocks_automation must be true or false")
 
     models = nested.get("models") or []
+    # A bare "models:" parses as an empty scalar, so it never reaches the list check below.
+    if "models" in top and top["models"] in (None, "") and not models:
+        fail(name, "models: is empty; list the model numbers, or write models: [] if unknown")
     if models and isinstance(models[0], str) and models[0].strip().startswith("-"):
         models = block_items(models)
     for m in models:

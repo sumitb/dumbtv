@@ -14,7 +14,8 @@ if [[ $DNSFILTER == 0 ]]; then
 fi
 
 PKG=dnsfilter.android
-APK_URL=https://f-droid.org/repo/dnsfilter.android_1506103.apk
+APK_VERSION=1506103
+APK_URL=https://f-droid.org/repo/dnsfilter.android_$APK_VERSION.apk
 # Pinned: F-Droid keeps one file per version, so this is stable. Update the hash
 # deliberately when the version above changes.
 APK_SHA256=3ddd0db322d1ca5fe950ea29dc1788af6e6581bb5f34694085fb4aa2e77b68ad
@@ -59,7 +60,12 @@ else
 fi
 
 step "app"
-if [[ $DRY_RUN == 0 ]]; then
+app_version() { dev "dumpsys package $PKG" | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -1; }
+if [[ $DRY_RUN == 0 && $(app_version) == "$APK_VERSION" ]]; then
+  # Reinstalling replaces the running always-on VPN, which drops a network adb session
+  # mid-install. The pinned version is already there, so there is nothing to gain.
+  note "personalDNSfilter $APK_VERSION already installed"
+elif [[ $DRY_RUN == 0 ]]; then
   curl -fsSL -o "$APK" "$APK_URL" || die "could not download $APK_URL"
   if command -v sha256sum >/dev/null; then got=$(sha256sum "$APK" | awk '{print $1}')
   else got=$(shasum -a 256 "$APK" | awk '{print $1}'); fi
@@ -67,10 +73,10 @@ if [[ $DRY_RUN == 0 ]]; then
   note "checksum ok"
   out=$("$ADB" -s "$SERIAL" install -r "$APK" 2>&1 | tail -1)
   printf '  %s\n' "$out"
-  case $out in
-    *Success*) ;;
-    *) die "adb install failed: $out" ;;
-  esac
+  # Replacing an app that holds the VPN can cut adb off before it prints Success, so the
+  # version the TV reports afterwards is the real answer.
+  adb_reconnect
+  [[ $(app_version) == "$APK_VERSION" ]] || die "adb install failed: $out"
 fi
 
 # The VPN consent dialog renders phone-sized on TVs and often ignores the
@@ -83,8 +89,11 @@ if [[ $DRY_RUN == 0 ]]; then
   curl -fsSL -o "$CONF_OUT" "$CONF_URL" || die "could not download the upstream config"
   # No filterAutoUpdateURL: the list is pushed by this script, so the TV never
   # downloads a blocklist and cannot end up with a half-written one.
+  # previousAutoUpdateURL must match the (now empty) update URL: the template ships "<none>",
+  # and a mismatch makes the app "update" at start and write an empty list over the pushed one.
   sed -i.dumbtv \
     -e 's|^filterAutoUpdateURL = |#filterAutoUpdateURL = |' \
+    -e 's|^previousAutoUpdateURL = .*|previousAutoUpdateURL = |' \
     -e 's|^detectDNS = .*|detectDNS = false|' \
     -e "s|^fallbackDNS = .*|fallbackDNS = \\#router; [$GW]::53::UDP|" \
     -e "s|^routeIPs =.*|routeIPs = $GW|" \
@@ -93,9 +102,30 @@ if [[ $DRY_RUN == 0 ]]; then
     -e 's|^reloadIntervalDays = .*|reloadIntervalDays = 3650|' \
     -e 's|^filterHostsFile = .*|filterHostsFile = FILTERHOSTS.TXT|' \
     "$CONF_OUT"
-  for want in '^#filterAutoUpdateURL' '^detectDNS = false' '^routeUnderlyingDNS = true'; do
+  # Fire OS 6 sends its time sync over the active network, which is this DNS-only
+  # VPN. Whitelisting "android" lets its clock reach NTP, but it unfilters every
+  # package running as the system user (on Fire OS 7 that includes Amazon's
+  # protected logmanager). Fire OS 7/8 keep their clock without it, so it is honoured
+  # on Fire OS 6 only. Opt-in: SYSTEM_DNS=1.
+  if [[ ${SYSTEM_DNS:-0} == 1 && $SDK -ge 28 ]]; then
+    note "SYSTEM_DNS=1 only applies to Fire OS 6; $(fireos_name) keeps its clock without it, so it stays off"
+    SYSTEM_DNS=0
+  fi
+  if [[ ${SYSTEM_DNS:-0} == 1 ]]; then
+    sed -i.dumbtv2 's|^androidAppWhiteList = .*|androidAppWhiteList = android|' "$CONF_OUT"
+  else
+    sed -i.dumbtv2 's|^androidAppWhiteList = .*|androidAppWhiteList = <none>|' "$CONF_OUT"
+  fi
+  for want in '^#filterAutoUpdateURL' '^detectDNS = false' '^routeUnderlyingDNS = true' '^previousAutoUpdateURL = $'; do
     grep -Eq "$want" "$CONF_OUT" || die "config template changed upstream (missing: $want) — update scripts/dnsfilter.sh"
   done
+  if [[ ${SYSTEM_DNS:-0} == 1 ]]; then
+    grep -Eq '^androidAppWhiteList = android' "$CONF_OUT" ||
+      die "config template changed upstream (androidAppWhiteList did not take)"
+  else
+    grep -Eq '^androidAppWhiteList = <none>' "$CONF_OUT" ||
+      die "config template changed upstream (androidAppWhiteList did not take)"
+  fi
   grep -Fqx "routeIPs = $GW" "$CONF_OUT" ||
     die "config template changed upstream (routeIPs did not take) — update scripts/dnsfilter.sh"
   note "patched; no list downloads on the TV"
@@ -111,6 +141,23 @@ if [[ $DRY_RUN == 0 ]]; then
     dev "test -d $DIR" >/dev/null 2>&1 && break
     sleep 4
   done
+  if ! dev "test -d $DIR" >/dev/null 2>&1 && [[ $SDK -ge 30 ]]; then
+    # Android 11 hides Android/data from adb, so neither the config nor the list can be
+    # pushed there. Android/media is still writable, and the app can import a file:// list
+    # from it. Choosing that list is a setting only the app's own screen can change.
+    MEDIA=/sdcard/Android/media/$PKG
+    dev "mkdir -p $MEDIA" >/dev/null 2>&1
+    "$ADB" -s "$SERIAL" push "$LIST" "$MEDIA/dumbtv-blocklist.txt" | tail -1 || die "push to $MEDIA failed"
+    acmd settings put secure always_on_vpn_app $PKG >/dev/null
+    step "one manual step ($(fireos_name) hides the app's files from adb)"
+    note "the blocklist is on the TV; tell the app to use it, with the remote:"
+    note "  1. open personalDNSfilter, then Advanced settings > Configure filter update"
+    note "  2. add an entry: file://storage/emulated/0/Android/media/$PKG/dumbtv-blocklist.txt"
+    note "  3. untick every other entry, go back, and reboot the TV"
+    note "  4. run ./scripts/verify.sh: the Amazon hosts should answer 127.0.0.1"
+    note "the routing tweaks (detectDNS=false, routeIPs) cannot be applied this way; see docs/GOTCHAS.md"
+    exit 0
+  fi
   dev "test -d $DIR" >/dev/null 2>&1 || die "the app did not create $DIR — is it installed?"
   dev "am force-stop $PKG" >/dev/null 2>&1
   sleep 2
@@ -118,9 +165,27 @@ if [[ $DRY_RUN == 0 ]]; then
   # A stale index makes the app keep serving the previous list.
   dev "rm -rf $DIR/FILTERHOSTS.TXT.idx $DIR/IDX_OUTDATED" >/dev/null 2>&1
   "$ADB" -s "$SERIAL" push "$LIST" "$DIR/FILTERHOSTS.TXT" | tail -1 || die "push of FILTERHOSTS.TXT failed"
+  # Without a download-info file, the first boot after setup sees no
+  # FILTERHOSTS.TXT.DLD_CNT and schedules an immediate "update ASAP" from the
+  # (empty) update-URL list, replacing the pushed blocklist with a stub.
+  # Writing it here marks the pushed list as fresh. Format mirrors
+  # DNSFilterManager.writeDownloadInfoFile: "<entries>\n<millis>\n".
+  # %s000 avoids %N, which macOS date(1) lacks.
+  printf '%s\n%s000\n' "$(grep -c . "$LIST")" "$(date +%s)" > "$WORK/dld_cnt.txt"
+  "$ADB" -s "$SERIAL" push "$WORK/dld_cnt.txt" "$DIR/FILTERHOSTS.TXT.DLD_CNT" | tail -1 \
+    || die "push of FILTERHOSTS.TXT.DLD_CNT failed"
 fi
 
 acmd settings put secure always_on_vpn_app $PKG >/dev/null
+
+if [[ $SDK -lt 28 && $DRY_RUN == 0 ]]; then
+  # Fire OS 6 drops always_on_vpn_app at boot, so the app's own boot receiver (AUTOSTART = true)
+  # has to start it, and Android 7.1 sends no BOOT_COMPLETED to an app left force-stopped.
+  # Opening it once clears that state; it starts filtering on the pushed list right away.
+  dev "am start -n $PKG/.DNSProxyActivity" >/dev/null 2>&1
+  sleep 8
+  dev "input keyevent KEYCODE_HOME" >/dev/null 2>&1
+fi
 
 if [[ $DRY_RUN == 1 ]]; then
   note "[dry-run] reboot, then check that blocked hosts answer 0.0.0.0"

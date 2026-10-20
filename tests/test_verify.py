@@ -1,0 +1,124 @@
+"""Regression checks for enabled-but-unbound services, entirely off-device."""
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LABEL = 'Service[label=dumbtv home button, feedbackType[FEEDBACK_GENERIC]]'
+
+
+class VerifyTests(unittest.TestCase):
+    def run_verify(self, dump, *, component='tv.dumbtv.home/.Guard', enabled='1',
+                   user='0', launcher='1', dump_code=0, alarms='min_futurity=0'):
+        replies = {
+            'getprop ro.build.version.sdk': '34',
+            'dumpsys activity activities': 'mResumedActivity: ActivityRecord{x u0 example.player/.Main}',
+            'dumpsys power': 'mWakefulness=Awake',
+            'settings get global alarm_manager_constants': alarms,
+            'am get-current-user': user,
+            f'settings --user {user} get secure enabled_accessibility_services': component,
+            f'settings --user {user} get secure accessibility_enabled': enabled,
+            'dumpsys accessibility': dump,
+            'pm list packages -d': '',
+        }
+        replies = {k: {'out': v} for k, v in replies.items()}
+        replies['dumpsys accessibility']['code'] = dump_code
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            data, log = tmp / 'responses.json', tmp / 'calls.jsonl'
+            data.write_text(json.dumps(replies))
+            env = dict(os.environ, ADB=str(ROOT / 'tests/fake_verify_adb.py'),
+                       SERIAL='test-tv', CONF=str(tmp / 'absent.conf'),
+                       DNSFILTER='0', LAUNCHER=launcher, FAKE_ADB_LOG=str(log),
+                       FAKE_ADB_RESPONSES=str(data))
+            result = subprocess.run(['bash', str(ROOT / 'scripts/verify.sh')],
+                                    env=env, text=True, capture_output=True)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertNotIn('unexpected command', result.stdout + result.stderr)
+        # Only reads and adb start-server are permitted by the fake.
+        return result, calls
+
+    @staticmethod
+    def modern(bound, user=0):
+        return f'User state[\n attributes:{{id={user}, flags=0}}\n Bound services:{{{bound}}}\n Enabled services:{{tv.dumbtv.home/.Guard}}\n Binding services:{{}}\n]\n'
+
+    def test_bound_android14_while_another_app_is_foreground(self):
+        result, _ = self.run_verify(self.modern(LABEL))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('bound, front is example.player/.Main', result.stdout)
+
+    def test_bound_android9_format(self):
+        dump = f'User state[attributes:{{id=0, currentUser=true}}\n services:{{{LABEL}}}]'
+        result, _ = self.run_verify(dump)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_bound_android9_class_name_after_update(self):
+        # Seen on a Fire OS 7 TV right after adb install -r: the label is not loaded yet.
+        by_class = LABEL.replace('dumbtv home button', 'tv.dumbtv.home.Guard')
+        dump = f'User state[attributes:{{id=0, currentUser=true}}\n services:{{{by_class}}}]'
+        result, _ = self.run_verify(dump)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_other_class_name_does_not_pass(self):
+        other = LABEL.replace('dumbtv home button', 'tv.dumbtv.home.GuardX')
+        dump = f'User state[attributes:{{id=0, currentUser=true}}\n services:{{{other}}}]'
+        result, _ = self.run_verify(dump)
+        self.assertEqual(result.returncode, 1)
+
+    def test_enabled_but_unbound_is_failure(self):
+        result, _ = self.run_verify(self.modern(''))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('enabled but not bound', result.stdout)
+
+    def test_label_outside_bound_section_does_not_pass(self):
+        result, _ = self.run_verify(self.modern('') + 'Binding services:{' + LABEL + '}')
+        self.assertEqual(result.returncode, 1)
+
+    def test_other_user_bound_does_not_pass(self):
+        result, _ = self.run_verify(self.modern(LABEL, 10) + self.modern(''))
+        self.assertEqual(result.returncode, 1)
+
+    def test_current_secondary_user_and_full_component(self):
+        result, _ = self.run_verify(self.modern('', 0) + self.modern(LABEL, 10), user='10',
+                                    component='example.reader/.Service:tv.dumbtv.home/tv.dumbtv.home.Guard')
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_similar_labels_or_components_do_not_pass(self):
+        for dump, component in [(self.modern(LABEL.replace('button,', 'button fake,')), 'tv.dumbtv.home/.Guard'),
+                                (self.modern(LABEL), 'tv.dumbtv.home.fake/.Guard')]:
+            with self.subTest(component=component):
+                result, _ = self.run_verify(dump, component=component)
+                self.assertEqual(result.returncode, 1)
+
+    def test_global_accessibility_disabled(self):
+        result, _ = self.run_verify(self.modern(LABEL), enabled='0')
+        self.assertEqual(result.returncode, 1)
+
+    def test_failed_empty_unknown_or_truncated_dump(self):
+        for dump, code in [('', 0), ('Permission denied', 0), (self.modern(LABEL), 1),
+                           ('User state[\n attributes:{id=0, flags=0}\n Bound services:{' + LABEL, 0)]:
+            with self.subTest(dump=dump):
+                result, _ = self.run_verify(dump, dump_code=code)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('cannot verify accessibility binding', result.stdout)
+
+    def test_unreadable_user_is_unknown(self):
+        result, _ = self.run_verify(self.modern(LABEL), user='Error')
+        self.assertEqual(result.returncode, 1)
+
+    def test_launcher_opt_out_skips_binding_queries(self):
+        result, calls = self.run_verify('', launcher='0')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(any('accessibility' in ' '.join(c) for c in calls))
+
+    def test_speed_requirement_is_preserved(self):
+        result, _ = self.run_verify(self.modern(LABEL), alarms='null')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('min_futurity=0 missing', result.stdout)
+
+
+if __name__ == '__main__':
+    unittest.main()

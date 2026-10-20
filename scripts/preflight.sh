@@ -19,7 +19,12 @@ note "verified boot $(dev1 getprop ro.boot.verifiedbootstate)  (1 = locked, cann
 note "gateway       $(gateway)"
 
 if is_fireos; then
-  note "platform      Fire OS"
+  note "platform      $(fireos_name)"
+  note "lists         ${DATA#$ROOT/}/$(basename "$(dirname "$(fos packages.txt)")")"
+  if [[ $SDK -lt 28 ]]; then
+    note "fire os 6     system apps are disabled only (no install-existing), no RUN_ANY_IN_BACKGROUND,"
+    note "              and the launcher must be built from source; 6.7 refuses its HOME hook (A11yAuthorizer)"
+  fi
 else
   note "platform      NOT Amazon hardware — read docs/OTHER-TVS.md before running debloat.sh"
 fi
@@ -33,17 +38,17 @@ note "dns filter    $(present dnsfilter.android && echo installed || echo 'not i
 note "launcher      $(present tv.dumbtv.home && echo 'dumbtv home installed' || echo 'not installed')"
 
 step "the pass would"
-note "disable $(($(list_of "$DATA/fireos/packages.txt" | wc -l | tr -d ' ') - 0)) Amazon packages, minus anything in never-disable.txt"
-note "remove $(list_of "$DATA/fireos/user-apps.txt" | wc -l | tr -d ' ') third-party apps"
-note "deny background work + data to $(list_of "$DATA/fireos/protected.txt" | wc -l | tr -d ' ') protected packages"
-note "apply $(list_of "$DATA/fireos/settings.txt" | wc -l | tr -d ' ') privacy settings"
+note "disable $(($(list_of "$(fos packages.txt)" | wc -l | tr -d ' ') - 0)) Amazon packages, minus anything in never-disable.txt"
+note "remove $(list_of "$(fos user-apps.txt)" | wc -l | tr -d ' ') third-party apps"
+note "deny background work + data to $(list_of "$(fos protected.txt)" | wc -l | tr -d ' ') protected packages"
+note "apply $(list_of "$(fos settings.txt)" | wc -l | tr -d ' ') privacy settings"
 note "install a DNS filter that blocks Amazon telemetry, Alexa and the OTA servers"
-note "replace the home screen with dumbtv home (this repo's own launcher, no permissions)"
+note "replace the home screen with dumbtv home (this repo's own launcher, no internet access)"
 note "reboot twice (about 5 minutes)"
 
 step "not touched, ever"
 note "/system (dm-verity), the bootloader, the launcher package itself, settings, TV input, device control, Bluetooth pairing"
-note "see data/fireos/never-disable.txt"
+note "see ${DATA#$ROOT/}/$(basename "$(dirname "$(fos never-disable.txt)")")/never-disable.txt"
 
 step "snapshot before anything changes"
 if [[ $DRY_RUN == 0 ]]; then

@@ -4,3 +4,5 @@
 # ads/analytics-looking packages and writes a commented block for this file.
 # Verify each candidate by hand on your device before uncommenting it, then open
 # a PR. Do not copy a list from another TV.
+# For one build's documented choices and feature tradeoffs (not an executable
+# removal list), see docs/TCL-G08-PACKAGES.md.

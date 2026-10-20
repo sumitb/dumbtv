@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 # Builds launcher/build/dumbtv-home.apk from the bare SDK tools: no Gradle, no libraries.
-# Needs a JDK 17+ and an Android SDK with platforms;android-28 and any build-tools.
+# Needs a JDK 17+ and an Android SDK with platforms;android-$MIN_SDK and any build-tools.
+#   MIN_SDK=28 (default)  Fire OS 7/8, the published release
+#   MIN_SDK=25            Fire OS 6 (Android 7.1). Compiling against android-25 makes javac
+#                         reject any android.* API Fire OS 6 lacks; java.* calls are checked
+#                         against JDK 8 by --release 8, so keep them to what Android 7.1 has.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # shellcheck disable=SC1091
 source version.env
+MIN_SDK=${MIN_SDK:-28}
 
-SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/homebrew/share/android-commandlinetools}}
-JAR=$SDK/platforms/android-28/android.jar
+SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
+if [[ -z $SDK ]]; then
+  for d in /opt/homebrew/share/android-commandlinetools "$HOME/Library/Android/sdk"; do
+    if [[ -f $d/platforms/android-$MIN_SDK/android.jar ]]; then SDK=$d; break; fi
+  done
+fi
+JAR=$SDK/platforms/android-$MIN_SDK/android.jar
 BT=$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -1 || true)
-[[ -f $JAR ]] || { echo "error: $JAR missing — sdkmanager 'platforms;android-28'" >&2; exit 1; }
+[[ -f $JAR ]] || { echo "error: $JAR missing — sdkmanager 'platforms;android-$MIN_SDK'" >&2; exit 1; }
 [[ -x $BT/aapt2 ]] || { echo "error: no build-tools in $SDK — sdkmanager 'build-tools;34.0.0'" >&2; exit 1; }
 
 if [[ -z ${JAVA_HOME:-} || ! -x ${JAVA_HOME:-}/bin/javac ]]; then
@@ -37,7 +47,7 @@ mkdir -p "$WORK/gen" "$WORK/classes" build
 
 "$BT/aapt2" compile --dir res -o "$WORK/res.zip"
 "$BT/aapt2" link -I "$JAR" --manifest AndroidManifest.xml "$WORK/res.zip" \
-  --min-sdk-version 28 --target-sdk-version 28 \
+  --min-sdk-version "$MIN_SDK" --target-sdk-version 28 \
   --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
   --java "$WORK/gen" -o "$WORK/app.apk"
 
@@ -46,7 +56,7 @@ find src "$WORK/gen" -name '*.java' > "$WORK/sources.txt"
   -classpath "$JAR" -d "$WORK/classes" @"$WORK/sources.txt"
 
 find "$WORK/classes" -name '*.class' > "$WORK/classes.txt"
-"$BT/d8" --release --min-api 28 --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
+"$BT/d8" --release --min-api "$MIN_SDK" --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
 (cd "$WORK" && zip -q -X app.apk classes.dex)
 
 "$BT/zipalign" -f -p 4 "$WORK/app.apk" "$WORK/aligned.apk"

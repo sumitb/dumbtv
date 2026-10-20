@@ -24,13 +24,20 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: sdk
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-28" "build-tools;34.0.0" >/dev/null
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-25" "platforms;android-28" "build-tools;34.0.0" >/dev/null
+      - name: build for fire os 6 (fails on any android.* API that Android 7.1 lacks)
+        run: MIN_SDK=25 ./launcher/build.sh
       - name: build
         run: ./launcher/build.sh
-      - name: no permissions
+      - name: no permissions on Fire OS 7 and later
         run: |
-          perms=$("$ANDROID_HOME/build-tools/34.0.0/aapt2" dump permissions launcher/build/dumbtv-home.apk | grep -c uses-permission || true)
-          [ "$perms" = 0 ] || { echo "the launcher must request no permissions, found $perms"; exit 1; }
+          # The only permissions allowed are Fire OS 6's Keeper trio, each capped at sdk 27.
+          dump=$("$ANDROID_HOME/build-tools/34.0.0/aapt2" dump permissions launcher/build/dumbtv-home.apk)
+          echo "$dump"
+          extra=$(echo "$dump" | grep uses-permission | grep -v "maxSdkVersion='27'" || true)
+          [ -z "$extra" ] || { echo "the launcher must request no permissions on sdk 28+, found: $extra"; exit 1; }
+          n=$(echo "$dump" | grep -c uses-permission || true)
+          [ "$n" -le 3 ] || { echo "expected at most the 3 Fire OS 6 permissions, found $n"; exit 1; }
 
   scripts:
     runs-on: ubuntu-latest
@@ -38,6 +45,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: syntax
         run: for f in scripts/*.sh launcher/*.sh; do bash -n "$f" || exit 1; done
+      - name: offline script tests (no device)
+        run: python3 -m unittest discover -s tests -v
       - name: launcher version manifest
         run: ./launcher/release-check.sh --manifest
       - name: no private addresses or hardware ids

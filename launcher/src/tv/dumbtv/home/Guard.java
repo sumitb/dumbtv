@@ -43,6 +43,7 @@ public final class Guard extends AccessibilityService {
     /** Lets Amazon's home stay on screen until the user leaves it. */
     static void pause() {
         paused = true;
+        Keeper.pause();
     }
 
     static void home(Context c) {

@@ -50,6 +50,23 @@ actually rebinds it. Force-stopping the launcher (`am force-stop tv.dumbtv.home`
 which any test harness and any APK update does) is enough to lose the binding:
 the setting still reads enabled, and HOME silently goes back to Amazon's home.
 
+**Enabled is not the same as bound.** `scripts/verify.sh` also reads
+`dumpsys accessibility` and looks for `dumbtv home button` in the current
+user's bound services. Android 9 labels this section `services`; newer builds
+use `Bound services`. A service appearing only under `Enabled services` or
+`Binding services` is not a running hook. Unknown dump formats fail verification
+instead of reporting success. These dumps expose labels rather than component
+IDs, so this check also requires the exact Guard component in the enabled list.
+It does not press HOME or prove the physical remote works.
+
+On the [TCL G08 build in the catalog](../catalog/devices/androidtv-tcl-g08.yaml),
+an enabled but unbound companion service was blocked by `TclAppBoot` with
+`callee doesn't have OP_AUTO_START permission`. Granting that app's `AUTO_START`
+app-op and rebinding its service resolved it, including after reboot. This is
+a TCL-specific observation, not a permission to grant on every TV. Preserve
+other enabled accessibility services when rebinding. The verifier only reports
+the failure; it never changes permissions or restarts services.
+
 **Amazon's home for ~5 s on every HOME press** means
 `alarm_manager_constants` lost `min_futurity=0` (an update or a settings reset).
 Check with `adb shell settings get global alarm_manager_constants` and re-run
@@ -103,3 +120,108 @@ factory-resets, re-run the pass.
 - Writing `/system/etc/hosts` — dm-verity, and the documented brick path.
 - `pm hide`, `pm suspend`, `pm clear` on protected packages — missing permissions.
 - Disabling the launcher — protected, and it leaves the TV with no home screen.
+
+## Fire OS 6 (Android 7.1)
+
+Found on a Fire TV Stick 4K (mantis, 2018) on Fire OS 6.7.1.1. The scripts read
+the API level at connect time and switch to `data/fireos6/` on their own.
+
+**No `cmd package install-existing`.** An Amazon app uninstalled with
+`pm uninstall -k --user 0` would only come back with a factory reset, so
+`debloat.sh` only disables system apps there. `restore.sh` then needs nothing but
+`pm enable`.
+
+**`com.amazon.firebat` is Prime Video**, not an OTA helper: launching it opens
+`com.amazon.pyrocore.IgnitionActivity`. It is in `data/fireos6/never-disable.txt`.
+
+**`com.amazon.vizzini` re-enables itself at every boot.** `pm disable-user`
+answers `disabled-user`, and after a reboot it is enabled and running again. Leave
+it alone either way.
+
+**`ps -A -o NAME` answers `bad pid '-A'`.** Fire OS 6 still has the toolbox `ps`;
+`running_names` in `scripts/lib.sh` falls back to its last column.
+
+**No `RUN_ANY_IN_BACKGROUND`.** That app-op arrived in Android 9. `RUN_IN_BACKGROUND
+ignore` exists and refuses background service starts (look for `rejectTime` in
+`appops get`), but a service that started while the app was open keeps running
+until the system needs the memory.
+
+**`always_on_vpn_app` is gone after the reboot.** Fire OS 6 does not keep the
+value `settings put` writes, so nothing starts the filter at boot except its own
+receiver (`AUTOSTART = true` in its config). Android 7.1 sends no BOOT_COMPLETED
+to an app that was force-stopped and not opened since, so `dnsfilter.sh` opens it
+once more before the reboot. `verify.sh` checks `tun0` there instead of the setting.
+
+**The app can write an empty list over the pushed one** (84 bytes: a
+`# Downloaded by personalDNSFilter at:` header and nothing else). At start it
+reloads at once when `previousAutoUpdateURL` differs from the update URL, or when
+`FILTERHOSTS.TXT.DLD_CNT` is missing; with no `filterAutoUpdateURL` that reload
+downloads nothing. The upstream template ships `previousAutoUpdateURL = <none>`,
+which never equals the emptied URL, so this is not Fire OS 6 only. `dnsfilter.sh`
+now empties `previousAutoUpdateURL` and writes `DLD_CNT` (whose mtime starts the
+reload interval) after the push.
+
+**The release launcher APK needs Android 9.** `launcher/install.sh` notices sdk 25
+and builds from source with `MIN_SDK=25` (needs a JDK and `platforms;android-25`).
+
+**Fire OS 6.7 refuses third-party accessibility services.** `settings put secure
+enabled_accessibility_services ...` exits 0 and changes nothing; writing the row
+through `content insert --uri content://settings/secure` does store it, but the
+service is never bound (`dumpsys accessibility` shows `services:{}`), and the log
+(`logcat -b all`) has `FireOSFwk:A11yAuthorizer ... "trust"#"false" ... "package"#"tv.dumbtv.home"`.
+That is Amazon's allowlist, not a bug to work around.
+
+**Fire OS 6 takes HOME over through the Keeper instead.** `Keeper` is a foreground
+service that reads the foreground package from `UsageStats` (granted with
+`appops set tv.dumbtv.home GET_USAGE_STATS allow`) and calls
+`ActivityManager.moveTaskToFront` when Amazon's launcher appears. That is not an
+activity launch, so the 5 s `APP_SWITCH_DELAY_TIME` does not apply: measured under
+0.25 s with a real remote key on 6.7.1.1. `install.sh` starts it and checks
+`dumpsys activity services`. At boot there is no dumbtv task yet, so the first
+start goes through an alarm-fired `PendingIntent`; `BOOT_COMPLETED` arrives about
+45–50 s after power-on, and dumbtv is front right after that. Older Fire OS 6
+builds may still bind the accessibility service; the Keeper is harmless there.
+
+**The Keeper must match the home activity, not just the package.** Fire TV
+Settings (`MainSettingsActivity`) also lives in `com.amazon.tv.launcher`; matching
+only the package pulls the user out of Settings. Check the event's class against
+`com.amazon.tv.launcher.ui.HomeActivity_vNext`.
+
+**The clock drifts while the filter VPN is up.** Fire OS 6 sends its time sync over
+the active network, and the filter's VPN only carries DNS, so NTP and HTTP time
+never answer. `SYSTEM_DNS=1` in `dumbtv.conf` adds `android` to the filter's
+`androidAppWhiteList`; the system bypasses the tunnel and the clock syncs. The cost:
+every package that runs as the system user (uid 1000) bypasses it too. On a Fire OS 7
+TV that is 25 packages, including `com.amazon.device.logmanager`,
+`com.amazon.media.recommendations` and `com.amazon.connectivitydiag`. Apps with their
+own UID, and the OTA package, stay filtered. It is opt-in and honoured on Fire OS 6
+only: Fire OS 7/8 keep their clock through the filter, so there it stays off.
+
+**`monkey` exits with `SYS_KEYS has no physical keys`** when the remote has gone
+to sleep, so it launches nothing. Pass `--pct-syskeys 0`, or launch apps with
+`am start -n`.
+
+## Fire OS 8 (Android 11)
+
+From a Fire TV Stick 4K Max (AFTKM, Fire OS 8.1.8.2) in issue #8; the catalog entry is
+`catalog/devices/fire-os-8-aftkm.yaml`.
+
+**adb cannot see `/sdcard/Android/data/<app>`.** Listing, reading and pushing all get
+`Permission denied`, so the filter's config and list cannot be pushed. `dnsfilter.sh`
+detects this, pushes the list to `/sdcard/Android/media/dnsfilter.android/` instead
+(adb can still write there) and prints the one step only the app's own screen can do:
+Advanced settings > Configure filter update, add
+`file://storage/emulated/0/Android/media/dnsfilter.android/dumbtv-blocklist.txt`, untick
+the rest, reboot. The routing tweaks (`detectDNS = false`, `routeIPs`) cannot be set this
+way. `verify.sh` skips the list count there and relies on the blocked-host lookups.
+
+**HOME does not move to dumbtv home yet.** Android 11 blocks the Guard's alarm-fired
+launch as a background activity start (logcat: `Background activity start ...
+callingUidHasAnyVisibleWindow: false`). The service is bound, so `verify.sh` reports it
+as bound; press HOME to see the truth. Android's documented way past this is the
+"display over other apps" permission (`SYSTEM_ALERT_WINDOW`), which the launcher does
+not declare. Adding it is open: it would end the launcher's no-permissions rule, and it
+needs testing on a Fire OS 8 device.
+
+**`com.amazon.dummy.settings` and `com.android.traceur` come back enabled after a
+reboot.** Re-run `debloat.sh` after a reboot to switch them off again.

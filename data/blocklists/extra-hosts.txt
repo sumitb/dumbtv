@@ -35,6 +35,8 @@ api.amazonalexa.com
 api.eu.amazonalexa.com
 api.fe.amazonalexa.com
 avs-alexa-14-na.amazon.com
+# seen resolving on an EU-region Fire TV Stick (issue #8)
+avs-alexa-18-eu.amazon.com
 devices.amazonalexa.com
 idc-service-ga.amazon.com
 idc-service-be.amazon.com
@@ -52,6 +54,10 @@ todo-ta-g7g.amazon.com
 pindorama.amazon.com
 latinum.amazon.com
 dcape-na.amazon.com
+# whole families: the filter blocks every subdomain of a listed domain (no * needed)
+ceviche.amazon.com
+minerva.amazon.com
+alexa-personality.amazon.dev
 
 # Amazon advertising: home promo rows, Appstore sponsored tiles, ad attribution.
 # Video CDNs (aiv-delivery/aiv-cdn) stay out when PRIME=1; artwork hosts are
